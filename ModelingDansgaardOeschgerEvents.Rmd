@@ -1,0 +1,337 @@
+---
+title: "Modeling Dansgaard-Oeschger Events"
+author: "Predrag Pilipovic"
+date: "2023-07-05"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+```
+
+## Dansgaard-Oeschger Events 
+
+- Dansgaard-Oeschger (DO) events refer to rapid and pronounced temperature changes that occurred within glacial periods during the last ice age
+- These events were characterized by abrupt transitions from cold periods, known as "stadiums," to warm periods, referred to as "interstadials"
+- One distinctive feature of DO events is their asymmetry: the warming phase was often rapid and occurred over a relatively short period, while the subsequent cooling phase was more gradual
+- Understanding the underlying mechanisms and triggers of DO events is an active area of research, as it can provide insights into the dynamics of climate change and the interactions between different components of the Earth's climate system during glacial periods
+
+
+## Motivation and Data Overview
+
+- Our goal is to understand the driving mechanisms behind climatic fluctuations during the last glacial period
+- Data is obtained from ice cores drilled in Greenland, spanning 120,000 years
+- Ice cores serve as valuable records of the past, allowing us to investigate changes in temperature and atmospheric circulation
+- Two key proxies analyzed in this study are $\delta^{18}\text{O}$ and $\text{Ca}^{2+}$
+- $\delta^{18}\text{O}$ represents the ratio of heavy $^{18}\text{O}$ to light $^{16}\text{O}$ isotopes in water molecules, while $\text{Ca}^{2+}$ measures the concentration of calcium ions in the ice cores
+
+## Proxy Measurements: $\delta^{18}\text{O}$ and $\text{Ca}^{2+}$
+
+- The standard notation for $\delta^{18}\text{O}$ is 
+$$δ^{18}\text{O} = \frac{[^{18}\text{O}]/[^{18}\text{O}]_{\text{sample}} - [^{18}\text{O}]/[^{18}\text{O}]_{\text{standard}}}{[^{18}\text{O}]/[^{18}\text{O}]_{\text{standard}}} × 1000$$
+- $\text{Ca}^{2+}$ concentrations are determined through chemical analysis of the ice cores
+- The ice cores provide a high-resolution (20 years) record of annual ice layers, allowing for detailed examination of $\delta^{18}\text{O}$ and $\text{Ca}^{2+}$ variations
+- Isotope fractionation in colder periods leads to more negative $\delta^{18}\text{O}$ values and higher values of $\text{Ca}^{2+}$ in ice caps
+
+## Seeking Driving Mechanisms: SDEs and Double-Well Potential
+
+- The objective is to identify the underlying driving mechanisms behind climatic fluctuations during the last glacial period
+- To achieve this, we employ stochastic differential equations (SDEs), which can capture complex dynamics 
+- A potential model of interest is the double-well potential, commonly used to represent systems with two stable states 
+- By applying the SDE framework and exploring the double-well potential, we aim to assess its suitability in explaining the observed $\delta^{18}\text{O}$ and $\text{Ca}^{2+}$ data
+- Specifically, we examine if the double-well potential can effectively model the two distinct phases of hot and cold periods observed in the data
+
+
+```{r libraries, include = FALSE}
+# Load necessary libraries
+library(torch)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(cowplot)
+library(ggpubr)
+
+# Source scripts
+source('functions_torch.R')
+source('functions_base.R')
+source('estimator.R')
+source('residuals.R')
+source("data_loading.R")
+source("data_preprocessing.R")
+
+# Load your data
+data_final <- preprocess_data(data)
+d18O <- data_final$d18O 
+Ca2 <- data_final$Ca2
+h <- 0.02
+n <- length(d18O)
+```
+
+## Loading data
+```{r data, echo = TRUE}
+
+# Fetch the data from the online Excel file
+excel_url <- paste("https://www.iceandclimate.nbi.ku.dk/data/GICC05",
+           "modelext_GRIP_and_GISP2_and_resampled_data_series_",
+           "Seierstad_et_al._2014_version_10Dec2014-2.xlsx", sep = "")
+res <- httr::GET(excel_url)
+excel_file <- tempfile(fileext = ".xlsx")
+writeBin(httr::content(res, as = "raw"), excel_file)
+  
+# Read the data from the Excel file
+data <- read_excel(excel_file, sheet = 3, range = "A51:F12278") %>%
+  slice(-1) %>%
+  select(1, ncol(.) - 1, ncol(.)) %>%
+  mutate_all(as.numeric) %>%
+  drop_na() %>%
+  rename(age = 1, d18O = 2, Ca2 = 3)
+
+# Clean up temporary file
+unlink(excel_file)
+```
+## Plotting preprocessed data
+
+```{r plot}
+# Create the individual time series plots
+plotd18O <- ggplot(data_final, aes(x = age, y = d18O)) +
+  geom_line() +
+  labs(y = expression(delta^{18}*O~anomaly),
+       title = expression(delta^{18}*O~anomaly~paste("and Ca"^list("2+"), "over time"))) +
+  theme_minimal() +
+  xlab(NULL) +
+  theme(axis.text.x = element_blank()) +
+  scale_x_reverse(labels = scales::comma)
+
+plotCa2 <- ggplot(data_final, aes(x = age, y = Ca2)) +
+  geom_line() +
+  labs(x = "time (years BP)", y = expression(paste("Ca"^list("2+")))) +
+  theme_minimal() +
+  scale_x_reverse(labels = scales::comma)
+
+# Create the individual density plots (rotated)
+plotDensityd18O <- ggplot(data = data_final, aes(y = d18O)) +
+  geom_density() +
+  labs(title = "densities") +
+  xlab(NULL) +
+  ylab(NULL) +
+  theme_minimal() + 
+  theme(axis.text = element_blank(),
+        plot.margin = margin(l = 0.2, r = 0.2, t = 0.4, b = 0.2, unit = "cm"))
+
+plotDensityCa2 <- ggplot(data = data_final, aes(y = Ca2)) +
+  geom_density() +
+  labs(x = "density") +
+  ylab(NULL) +
+  theme_minimal() + 
+  theme(axis.text.y = element_blank())
+
+# Arrange the plots into a 2x2 layout with different plot sizes
+grid.arrange(plotd18O, plotDensityd18O, plotCa2, plotDensityCa2,
+             ncol = 2, nrow = 2, heights = c(1, 1), widths = c(3, 1))
+```
+
+## The double-well potential
+
+- Double-well potential SDE 
+$$ d X_t = -V'(X_t) dt + \sigma d W_t$$
+- $X_t$ observed process, $W_t$ standard Wiener process 
+- Potential function $V_t(x) = a_0 x + a_1 \frac{x^2}{2} + a_3 \frac{x^4}{4}$
+
+```{r double_well, fig.width=4, fig.height=2.5, fig.align = 'center'}
+
+potential_func <- function(x, a) {-(a[1]*x + a[2]*(x^2)/2 + a[3]*(x^4)/4)}
+
+ggplot(data.frame(x = range(data_final$Ca2)), aes(x)) +
+  stat_function(fun = function(x) potential_func(x, c(-0.2918828, 1.2348316, -0.8472531))) +
+  labs(y = "V(x)") +
+  theme_minimal() 
+```
+
+## Likelihood based estimators 
+
+- Different ways to estimate parameters 
+- Discretize SDE $\to$ Pseudo likelihood $\to$ MLE 
+- Different discretization methods: 
+    - Euler-Maruyama (EM)
+    - Local linearization (LL)
+    - Strang splitting scheme (S)
+```{r table}
+table_data <- data.frame(
+  ` ` = c("EM", "LL", "S"),
+  `a_0` = c(-0.1360257, 0.2498456, -0.3432161),
+  `a_1` = c(-0.2918828, 1.2348316, -0.8472531),
+  `a_3` = c(-0.2715296, 1.0799838, -0.7813464),
+  `sigma^2` = c(0.9503549, 0.9757831, 0.9731690)
+)
+knitr::kable(table_data, align = 'c', col.names = c("", "$a_0$", "$a_1$", "$a_3$", "$\\sigma^2$"))
+```
+
+## Optimization with R Torch
+
+```{r optimization, echo = TRUE}
+estimator <- function(obj, data, h, par_star, num_iterations = 500) {
+  par_star <- torch_tensor(par_star, requires_grad = TRUE)
+  
+  optimizer <- optim_rprop(par_star)
+  
+  calc_loss <- function() {
+    optimizer$zero_grad()
+    value <- obj(par_star, data, h)
+    value$backward()
+    value
+  }
+  for (i in 1:num_iterations) {
+    par_old = as.matrix(par_star)
+    optimizer$step(calc_loss)
+    par_new = as.matrix(par_star)
+    if(norm(par_new - par_old) < 10^-5) break
+  }
+  par_star
+}
+```
+
+## Goodness of fit: QQ plots
+
+```{r residuals}
+# pre-computed for the speed
+d18O_est_EM <- c(0.57115823, -1.63956141, -0.03385492, 13.84068775)
+d18O_est_LL <- c(0.65949810, -1.30780339, -0.07741711, 14.09685707)
+d18O_est_S <- c(0.61785728, -1.45830965, -0.04653005, 14.23631477)
+
+Ca2_est_EM <- c(-0.1360257, 0.2498456, -0.3432161, 0.9503549)
+Ca2_est_LL <- c(-0.2918828, 1.2348316, -0.8472531, 0.9757831)
+Ca2_est_S <- c(-0.2715296, 1.0799838, -0.7813464, 0.9731690)
+
+d18O_res_S <- quantile_residuals(d18O, mu_S_base, f_base, OmegahS, d18O_est_S, h, "S")
+d18O_res_EM <- quantile_residuals(d18O, mu_EM_base, NULL, function(x, y) x[4], d18O_est_EM, h, "EM")
+d18O_res_LL <- quantile_residuals(d18O, mu_LL_base, NULL, OmegahLL_base, d18O_est_LL, h, "LL")[-n]
+
+Ca2_res_S <- quantile_residuals(Ca2, mu_S_base, f_base, OmegahS, Ca2_est_S, h, "S")
+Ca2_res_EM <- quantile_residuals(Ca2, mu_EM_base, NULL, function(x, y) x[4], Ca2_est_EM, h, "EM")
+Ca2_res_LL <- quantile_residuals(Ca2, mu_LL_base, NULL, OmegahLL_base, Ca2_est_LL, h, "LL")[-n]
+
+# Create a data frame with all residuals
+residuals_df <- data.frame(
+  Model = rep(c("EM", "Strang", "Local Linearization"), each = length(d18O_res_EM), times = 2),
+  Variable = rep(c(rep("d18O", 3 * length(d18O_res_EM)), rep("Ca2", 3 * length(Ca2_res_EM)))),
+  Residuals = c(d18O_res_EM, d18O_res_S, d18O_res_LL, Ca2_res_EM, Ca2_res_S, Ca2_res_LL)
+)
+
+# Create separate data frames for each variable
+residuals_df_d18O <- residuals_df[residuals_df$Variable == "d18O", ]
+residuals_df_Ca2 <- residuals_df[residuals_df$Variable == "Ca2", ]
+
+# Create QQ plots for each variable
+plot_d18O <- ggplot(residuals_df_d18O, aes(sample = Residuals)) +
+  geom_qq() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(y = expression(delta^{18}*O)) +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(), axis.text.x = element_blank()) +
+  facet_grid(. ~ Model, scales = "free") +
+  lims(x = c(-5, 5), y = c(-5, 5))
+
+plot_Ca2 <- ggplot(residuals_df_Ca2, aes(sample = Residuals)) +
+  geom_qq() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(x = "Theoretical Quantiles", y = expression(paste("Ca"^list("2+")))) +
+  theme_minimal() +
+  theme(strip.text.x = element_blank()) +
+  facet_grid(. ~ Model, scales = "free") +
+  lims(x = c(-5, 5), y = c(-5, 5))
+
+# Arrange the plots vertically
+grid.arrange(plot_d18O, plot_Ca2, ncol = 1)
+```
+
+## Results 
+
+```{r results, fig.height = 5}
+# Define the potential function
+potential_func <- function(x, a) {-(a[1]*x + a[2]*(x^2)/2 + a[3]*(x^4)/4)}
+
+# Plot the function
+potential_plotCa2 <- ggplot(data.frame(x = range(data_final$Ca2)), aes(x)) +
+  stat_function(fun = function(x) potential_func(x, Ca2_est_EM), color = "red") +
+  stat_function(fun = function(x) potential_func(x, Ca2_est_S), color = "green") +
+  stat_function(fun = function(x) potential_func(x, Ca2_est_LL), color = "blue") +
+  labs(y = "potential") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        plot.margin = margin(l = 1.2, r = 0.2, t = 0.2, b = 0.1, unit = "cm"))
+
+# Plot the function
+potential_plotd18O <- ggplot(data.frame(x = range(data_final$d18O)), aes(x)) +
+  stat_function(fun = function(x) potential_func(x, d18O_est_EM), aes(color = "EM")) +
+  stat_function(fun = function(x) potential_func(x, d18O_est_S), aes(color = "S")) +
+  stat_function(fun = function(x) potential_func(x, d18O_est_LL), aes(color = "LL")) +
+  scale_color_manual(values = c("EM" = "red", 
+                                "S" = "green", 
+                                "LL" = "blue"), 
+                     guide = guide_legend(nrow = 1, byrow = TRUE)) +
+  labs(y = "potential") +
+  theme_minimal() +
+  theme(axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        legend.position = c(0.5, 1),
+        legend.justification = c(0.5, 1),
+        legend.title = element_blank(), 
+        plot.margin = margin(l = 0.21, r = 0.38, t = 0.21, b = 0.2, unit = "cm")) + 
+  scale_y_continuous(position = "right")
+
+# Create the individual time series plots
+new_plotd18O <- ggplot(data_final, aes(x = age, y = d18O)) +
+  geom_line() +
+  labs(y = expression(delta^{18}*O~anomaly)) +
+  theme_minimal() +
+  xlab(NULL) +
+  theme(axis.text.y = element_blank(), 
+        plot.margin = margin(l = 0.1, r = 0.9, t = 0.2, b = 0.1, unit = "cm")) +
+  scale_x_reverse(labels = scales::comma) + 
+  coord_flip()
+
+new_plotCa2 <- ggplot(data_final, aes(x = age, y = Ca2)) +
+  geom_line() +
+  labs(x = "time (years BP)", y = expression(paste("Ca"^list("2+")))) +
+  theme_minimal() +
+  scale_x_reverse(labels = scales::comma) + 
+  coord_flip()
+
+# Create the individual density plots (rotated)
+new_plotDensityd18O <- ggplot(data = data_final, aes(x = d18O)) +
+  geom_density() +
+  xlab(NULL) +
+  ylab(NULL) +
+  theme_minimal() + 
+  theme(axis.text.x = element_blank(), 
+        plot.margin = margin(l = 0.21, r = 0.12, t = 0.21, b = 0.2, unit = "cm")) + 
+  scale_y_continuous(position = "right")
+
+new_plotDensityCa2 <- ggplot(data = data_final, aes(x = Ca2)) +
+  geom_density() +
+  labs(y = "density") +
+  xlab(NULL) +
+  theme_minimal() + 
+  theme(axis.text.x = element_blank(),
+        plot.margin = margin(l = 0.9, r = 0.2, t = 0.25, b = 0.2, unit = "cm")) 
+
+# Arrange the plots into a 2x2 layout with different plot sizes
+grid.arrange(potential_plotCa2, potential_plotd18O,
+             new_plotDensityCa2, new_plotDensityd18O, 
+             new_plotCa2, new_plotd18O,
+             ncol = 2, nrow = 3,
+             heights = c(3, 2, 6),
+             widths = c(1, 1))
+
+```
+
+## Conclusion 
+
+- Stochastic Differential Equations (SDEs) offer a suitable framework for understanding the underlying nature of data
+- The double-well potential shows promise in explaining Dansgaard-Oeschger (DO) events data
+- $\text{Ca}^{2+}$ proves to be a better representation of the two stable states compared to $\delta^{18}\text{O}$ 
+- Inference for SDEs poses challenges, as the commonly used Expectation-Maximization (EM) method fails in this context
+- The estimated potential confirms the asymmetry of DO events, with colder states being longer and more probable
+- Future work involves calculating the expected escape time and exploring oscillatory models like Fitz-Hugh-Nagumo to capture DO events' oscillatory behavior
